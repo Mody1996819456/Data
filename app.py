@@ -11,28 +11,34 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# تحميل البيانات من ملف Excel
+# تحميل البيانات من ملف Excel (ورقة 'فحص حقلي')
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_excel("سجل الفحص الحقلي 0.xlsx", sheet_name="فحص حقلي")
+        df = pd.read_excel("data.xlsx", sheet_name="فحص حقلي")
     except FileNotFoundError:
-        st.error("❌ الملف 'سجل الفحص الحقلي 0.xlsx' غير موجود في المجلد!")
+        st.error("❌ الملف 'data.xlsx' غير موجود في نفس مجلد التطبيق!")
         st.stop()
-    except Exception as e:
-        st.error(f"❌ خطأ في قراءة الملف: {e}")
-        st.stop()
+    except ValueError as e:
+        if "Worksheet named 'فحص حقلي' not found" in str(e):
+            st.error("❌ الورقة 'فحص حقلي' غير موجودة في الملف!")
+            st.stop()
+        else:
+            st.error(f"❌ خطأ في قراءة البيانات: {e}")
+            st.stop()
     
-    # تحويل التواريخ
+    # تحويل الأعمدة الزمنية
     df['تاريخ الفحص'] = pd.to_datetime(df['تاريخ الفحص'], errors='coerce')
     df['تاريخ المعاملة'] = pd.to_datetime(df['تاريخ المعاملة'], errors='coerce')
+    
     return df
 
-df = load_data()
+df_original = load_data()
+df = df_original.copy()
 
-# العنوان
+# العنوان الرئيسي
 st.title("🌴 نظام تحليل فحص آفات النخيل")
-st.markdown("مرحباً! هذا النظام يُحلّل سجلات الفحص الميداني لآفات النخيل ويعرض الرؤى بصريًا.")
+st.markdown("مرحباً! هذا النظام يحلّل سجلات الفحص الميداني لآفات النخيل ويعرض الرؤى بصريًا.")
 
 # -------------------------------
 # الفلاتر في الشريط الجانبي
@@ -54,22 +60,22 @@ start_date = pd.to_datetime(start_date)
 end_date = pd.to_datetime(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
 
 # فلتر القطاع
-sectors = ["الكل"] + sorted(df['القطاع'].dropna().unique().tolist())
+sectors = ["الكل"] + sorted(df['القطاع'].dropna().unique().astype(str).tolist())
 selected_sector = st.sidebar.selectbox("القطاع", sectors)
 if selected_sector != "الكل":
-    df = df[df['القطاع'] == selected_sector]
+    df = df[df['القطاع'].astype(str) == selected_sector]
 
 # فلتر المحبس
-sub_areas = ["الكل"] + sorted(df['المحبس'].dropna().unique().tolist())
+sub_areas = ["الكل"] + sorted(df['المحبس'].dropna().unique().astype(str).tolist())
 selected_sub = st.sidebar.selectbox("المحبس", sub_areas)
 if selected_sub != "الكل":
-    df = df[df['المحبس'] == selected_sub]
+    df = df[df['المحبس'].astype(str) == selected_sub]
 
 # فلتر نوع الآفة
-pests = ["الكل"] + sorted(df['وصف الافة'].dropna().unique().tolist())
+pests = ["الكل"] + sorted(df['وصف الافة'].dropna().unique().astype(str).tolist())
 selected_pest = st.sidebar.selectbox("نوع الآفة", pests)
 if selected_pest != "الكل":
-    df = df[df['وصف الافة'] == selected_pest]
+    df = df[df['وصف الافة'].astype(str) == selected_pest]
 
 # تطبيق فلتر التاريخ
 df = df[(df['تاريخ الفحص'] >= start_date) & (df['تاريخ الفحص'] <= end_date)]
@@ -78,10 +84,11 @@ df = df[(df['تاريخ الفحص'] >= start_date) & (df['تاريخ الفحص
 # الملخص العام
 # -------------------------------
 st.subheader("📈 ملخص عام")
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 col1.metric("إجمالي السجلات", f"{len(df):,}")
 col2.metric("الآفات الفريدة", df['وصف الافة'].nunique())
 col3.metric("القطاعات", df['القطاع'].nunique())
+col4.metric("المحابس", df['المحبس'].nunique())
 
 # -------------------------------
 # الرسوم البيانية
@@ -91,14 +98,17 @@ st.subheader("📊 الرسوم البيانية")
 # 1. أكثر الآفات انتشارًا
 st.write("#### أكثر الآفات انتشارًا")
 top_pests = df['وصف الافة'].value_counts().head(10)
-fig1 = px.bar(
-    top_pests,
-    orientation='h',
-    labels={'value': 'العدد', 'index': 'نوع الآفة'},
-    height=400
-)
-fig1.update_layout(yaxis={'categoryorder': 'total ascending'})
-st.plotly_chart(fig1, use_container_width=True)
+if not top_pests.empty:
+    fig1 = px.bar(
+        top_pests,
+        orientation='h',
+        labels={'value': 'العدد', 'index': 'نوع الآفة'},
+        height=400
+    )
+    fig1.update_layout(yaxis={'categoryorder': 'total ascending'})
+    st.plotly_chart(fig1, use_container_width=True)
+else:
+    st.info("لا توجد بيانات عن الآفات.")
 
 # 2. التوزيع حسب تصنيف الآفة
 st.write("#### التوزيع حسب تصنيف الآفة")
@@ -112,13 +122,13 @@ if not class_counts.empty:
     )
     st.plotly_chart(fig2, use_container_width=True)
 else:
-    st.info("لا توجد بيانات في 'تصنيف الافة' للعرض.")
+    st.info("لا توجد بيانات لتصنيف الآفات.")
 
 # 3. المبيدات الأكثر استخدامًا
 st.write("#### المبيدات الأكثر استخدامًا")
 pesticide_cols = ['المبيد 1', 'المبيد 2', 'المبيد 3', 'المبيد 4', 'المبيد 5']
-all_pesticides = pd.concat([df[col].dropna() for col in pesticide_cols], ignore_index=True)
-all_pesticides = all_pesticides[all_pesticides != "لا يوجد"]
+all_pesticides = pd.concat([df[col].dropna().astype(str) for col in pesticide_cols], ignore_index=True)
+all_pesticides = all_pesticides[~all_pesticides.str.contains("لا يوجد|لايوجد", case=False, na=False)]
 top_pesticides = all_pesticides.value_counts().head(10)
 
 if not top_pesticides.empty:
@@ -153,7 +163,7 @@ else:
 st.subheader("📋 البيانات المفلترة")
 st.dataframe(df.fillna("—"), height=500)
 
-# تنزيل البيانات
+# تنزيل البيانات المفلترة
 csv = df.to_csv(index=False, encoding='utf-8-sig')
 st.download_button(
     label="📥 تنزيل البيانات كـ CSV",
